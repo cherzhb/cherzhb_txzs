@@ -1,0 +1,10 @@
+{
+  "name": "txghzs-server",
+  "version": "1.0.0",
+  "description": "退休规划助手后端服务",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  }
+}
