@@ -113,31 +113,56 @@ const submitForm = () => {
 const genderRef = ref(1)
 
 // 设置出生日期
-const birthDateRef = ref('')
+const birthDate = ref('')
+const birthDatePickerRef = ref([])
 
 // 设置人员身份
-const jobTypeRef = ref(1)
+const jobType = ref(1)
 
 // 选择人员身份点击
 const onJobTypeConfirm = ({ selectedOptions }) => {
-  jobTypeRef.value = selectedOptions[0].value
-};
+  jobType.value = selectedOptions[0].value
+}
 
 // 设置参保地
-const locationRef = ref('110000')
+const location = ref('110000')
+
+// 参保地选项
+const locationColumns = ref([
+  { text: '北京市', value: '110000' },
+  { text: '上海市', value: '310000' },
+  { text: '深圳市', value: '440300' },
+  { text: '广州市', value: '440100' },
+  { text: '南京市', value: '320100' },
+  { text: '苏州市', value: '320500' },
+  { text: '杭州市', value: '330100' },
+  { text: '郑州市', value: '410100' },
+  { text: '长沙市', value: '430100' },
+  { text: '武汉市', value: '420100' }
+])
+
+const onLocationConfirm = ({ selectedOptions }) => {
+  location.value = selectedOptions[0].value
+}
+
+// 出生日期弹窗
+const showDatePicker = ref(false)
+
+// 参保地弹窗
+const showLocationPicker = ref(false)
 
 // 完成档案设置
 const completeProfile = () => {
-  if (!birthDateRef.value) {
+  if (!birthDate.value) {
     showToast('请选择出生日期')
     return
   }
   
   userStore.updateProfile({
     gender: genderRef.value,
-    birthDate: birthDateRef.value,
-    jobType: jobTypeRef.value,
-    locationCode: locationRef.value,
+    birthDate: birthDate.value,
+    jobType: jobType.value,
+    locationCode: location.value,
     isVerified: true
   })
   

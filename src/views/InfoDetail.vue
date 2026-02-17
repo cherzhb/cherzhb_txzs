@@ -244,32 +244,32 @@ const toolbarActions = [
   color: #323233;
 }
 
-/deep/ .article-content h2 {
+:deep(.article-content h2) {
   font-size: 1.3em;
   margin: 1.5em 0 0.8em;
   color: #323233;
   line-height: 1.4;
 }
 
-/deep/ .article-content h3 {
+:deep(.article-content h3) {
   font-size: 1.15em;
   margin: 1.3em 0 0.6em;
   color: #323233;
   line-height: 1.4;
 }
 
-/deep/ .article-content p {
+:deep(.article-content p) {
   margin-bottom: 1em;
   text-align: justify;
 }
 
-/deep/ .article-content ul,
-/deep/ .article-content ol {
+:deep(.article-content ul),
+:deep(.article-content ol) {
   margin: 1em 0;
   padding-left: 2em;
 }
 
-/deep/ .article-content li {
+:deep(.article-content li) {
   margin-bottom: 0.5em;
   line-height: 1.8;
 }
