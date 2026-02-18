@@ -1,5 +1,4 @@
 name: Build APK
-
 on:
   push:
     branches: [ main ]
@@ -8,6 +7,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
       - uses: actions/checkout@v4
@@ -15,14 +15,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
       
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+        timeout-minutes: 10
       
-      - run: pnpm install
-      
-      - run: pnpm build
+      - name: Build web app
+        run: npm run build
+        timeout-minutes: 5
       
       - uses: actions/setup-java@v4
         with:
@@ -31,16 +32,26 @@ jobs:
       
       - uses: android-actions/setup-android@v3
       
-      - run: pnpm add @capacitor/core @capacitor/cli @capacitor/android
+      - name: Setup Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
       
-      - run: npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist
-        continue-on-error: true
+      - name: Setup Capacitor
+        run: |
+          npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist || true
+          npx cap add android || true
+          npx cap copy android
+          npx cap update android
       
-      - run: rm -rf android && npx cap add android
-      
-      - run: npx cap copy android && npx cap update android
-      
-      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+        timeout-minutes: 15
       
       - uses: actions/upload-artifact@v4
         with:
