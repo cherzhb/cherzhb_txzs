@@ -1,59 +1,57 @@
 name: Build APK
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
-        timeout-minutes: 10
-      
+
       - name: Build web app
         run: npm run build
-        timeout-minutes: 5
-      
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      
-      - uses: android-actions/setup-android@v3
-      
+
       - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configure Android SDK
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
-      
-      - name: Setup Capacitor
+
+      - name: Sync Capacitor
         run: |
-          npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist || true
-          npx cap add android || true
-          npx cap copy android
-          npx cap update android
-      
+          rm -rf android || true
+          npx cap sync android
+
       - name: Build APK
         run: |
           cd android
-          chmod +x gradlew
+          chmod +x gradlew || true
           ./gradlew assembleDebug --no-daemon
-        timeout-minutes: 15
-      
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
