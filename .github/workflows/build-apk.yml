@@ -16,11 +16,14 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'  # Capacitor 8 需要 Node 22+
+        node-version: '22'
     
     - name: Install dependencies
       run: |
-        npm install
+        # 忽略原生模块编译脚本（sqlite3 等）
+        npm install --ignore-scripts --legacy-peer-deps
+        # 手动安装前端依赖
+        npm rebuild vite terser --verbose
     
     - name: Build web app
       run: |
