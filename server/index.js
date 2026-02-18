@@ -20,6 +20,8 @@ if (!JWT_SECRET) {
 }
 
 // 安全中间件
+app.set('trust proxy', 1);
+// 安全中间件
 app.use(helmet({
   contentSecurityPolicy: false
 }));
@@ -40,7 +42,15 @@ const authLimiter = rateLimit({
 });
 
 // 中间件
-app.use(cors());
+// CORS配置
+app.use(cors({
+  origin: [
+    'https://txghzs.19780918.xyz',
+    'http://localhost:5173',
+    'http://localhost:3001'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(generalLimiter);

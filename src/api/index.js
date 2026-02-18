@@ -1,6 +1,9 @@
 import axios from 'axios'
 
-const API_BASE = '/api'
+// 动态API地址：生产环境使用域名，开发环境使用相对路径
+const API_BASE = window.location.hostname.includes('19780918.xyz') 
+  ? 'https://api.19780918.xyz/api' 
+  : '/api'
 
 // 创建 axios 实例
 const api = axios.create({

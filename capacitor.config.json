@@ -1,0 +1,14 @@
+{
+  "appId": "com.txghzs.app",
+  "appName": "退休规划助手",
+  "webDir": "dist",
+  "server": {
+    "url": "https://txghzs.19780918.xyz",
+    "cleartext": true
+  },
+  "android": {
+    "buildOptions": {
+      "releaseType": "APK"
+    }
+  }
+}
