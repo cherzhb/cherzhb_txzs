@@ -19,10 +19,14 @@ jobs:
       with:
         node-version: '22'
     
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+    
     - name: Create minimal package.json for build
       run: |
-        # 创建一个只包含前端依赖的临时 package.json
-        cat > package.build.json << 'PKG'
+        cat > package.json << 'PKG'
         {
           "name": "txghzs-build",
           "version": "1.0.0",
@@ -47,9 +51,6 @@ jobs:
           }
         }
         PKG
-        mv package.json package.full.json
-        mv package.build.json package.json
-        mv vite.config.js vite.config.js.bak
     
     - name: Create vite config
       run: |
@@ -73,11 +74,11 @@ jobs:
         VITE
     
     - name: Install dependencies
-      run: npm install
+      run: pnpm install --frozen-lockfile=false
     
     - name: Build web app
       run: |
-        npm run build
+        pnpm build
         ls -la dist/
     
     - name: Setup Java
@@ -91,7 +92,7 @@ jobs:
     
     - name: Setup Capacitor and build APK
       run: |
-        npm install @capacitor/core @capacitor/cli @capacitor/android
+        pnpm add @capacitor/core @capacitor/cli @capacitor/android
         npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist || true
         npx cap add android || true
         npx cap copy android
