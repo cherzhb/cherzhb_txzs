@@ -20,13 +20,12 @@ jobs:
     
     - name: Install dependencies
       run: |
-        npm install
-        npm list --depth=0
+        # 只安装前端依赖，忽略可选依赖
+        npm install --legacy-peer-deps --ignore-scripts
+        npm rebuild
     
     - name: Build web app
       run: |
-        echo "Node version: $(node -v)"
-        echo "NPM version: $(npm -v)"
         npm run build
         ls -la dist/
     
@@ -39,13 +38,17 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
     
-    - name: Add Android platform
+    - name: Setup Capacitor
       run: |
         npm install @capacitor/core @capacitor/cli @capacitor/android --save
-        npx cap add android || true
     
-    - name: Copy web files to Android
+    - name: Initialize Capacitor
       run: |
+        npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist || true
+    
+    - name: Add Android platform
+      run: |
+        npx cap add android || true
         npx cap copy android
         npx cap update android
     
