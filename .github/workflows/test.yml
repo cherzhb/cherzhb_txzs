@@ -1,0 +1,16 @@
+name: Test Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hello
+        run: echo "Hello World"
+      
+      - name: Check Node
+        run: node --version
