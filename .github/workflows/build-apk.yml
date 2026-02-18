@@ -92,11 +92,23 @@ jobs:
     
     - name: Setup Capacitor and build APK
       run: |
+        # 安装 Capacitor
         pnpm add @capacitor/core @capacitor/cli @capacitor/android
-        npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist || true
-        npx cap add android || true
+        
+        # 删除可能存在的 android 目录
+        rm -rf android
+        
+        # 初始化 Capacitor
+        npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist
+        
+        # 添加 Android 平台
+        npx cap add android
+        
+        # 复制 Web 资源
         npx cap copy android
         npx cap update android
+        
+        # 构建 APK
         cd android
         chmod +x gradlew
         ./gradlew assembleDebug --no-daemon
