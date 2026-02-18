@@ -5,11 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  NPM_CONFIG_TIMEOUT: 300000
-  NPM_CONFIG_FETCH_TIMEOUT: 300000
-  NPM_CONFIG_FETCH_RETRY: 5
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -23,16 +18,17 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '22'
-        cache: 'npm'
     
-    - name: Install dependencies
+    - name: Install dependencies with yarn
       run: |
-        npm install --prefer-offline --no-audit --loglevel=error
-      timeout-minutes: 15
+        # 删除 package-lock.json 使用 yarn
+        rm -f package-lock.json
+        npm install -g yarn
+        yarn install --frozen-lockfile=false --network-timeout 600000
     
     - name: Build web app
       run: |
-        npm run build
+        yarn build
         ls -la dist/
     
     - name: Setup Java
