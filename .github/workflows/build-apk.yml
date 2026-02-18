@@ -16,13 +16,11 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22'  # Capacitor 8 需要 Node 22+
     
     - name: Install dependencies
       run: |
-        # 只安装前端依赖，忽略可选依赖
-        npm install --legacy-peer-deps --ignore-scripts
-        npm rebuild
+        npm install
     
     - name: Build web app
       run: |
@@ -37,14 +35,6 @@ jobs:
     
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-    
-    - name: Setup Capacitor
-      run: |
-        npm install @capacitor/core @capacitor/cli @capacitor/android --save
-    
-    - name: Initialize Capacitor
-      run: |
-        npx cap init "退休规划助手" "com.txghzs.app" --web-dir dist || true
     
     - name: Add Android platform
       run: |
