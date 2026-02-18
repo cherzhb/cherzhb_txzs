@@ -25,10 +25,17 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem('user', JSON.stringify(userData))
   }
 
+  // 设置用户 (setUser = login的别名，兼容不同调用方式)
+  function setUser(userData) {
+    user.value = userData
+    localStorage.setItem('user', JSON.stringify(userData))
+  }
+
   // 登出
   function logout() {
     user.value = null
     localStorage.removeItem('user')
+    localStorage.removeItem('token')
     profile.value = {
       gender: 1,
       birthDate: '',
@@ -52,7 +59,6 @@ export const useUserStore = defineStore('user', () => {
   function restoreFromStorage() {
     const savedUser = localStorage.getItem('user')
     const savedProfile = localStorage.getItem('profile')
-    
     if (savedUser) {
       user.value = JSON.parse(savedUser)
     }
@@ -66,6 +72,7 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     profile,
     login,
+    setUser,
     logout,
     updateProfile,
     restoreFromStorage

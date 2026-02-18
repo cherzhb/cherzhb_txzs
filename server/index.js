@@ -5,15 +5,45 @@ const jwt = require('jsonwebtoken');
 const sqlite3 = require('sqlite3').verbose();
 const nodemailer = require('nodemailer');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
+const { body, validationResult } = require('express-validator');
+const helmet = require('helmet');
+const compression = require('compression');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'txghzs-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('❌ JWT_SECRET 环境变量未设置！');
+  process.exit(1);
+}
+
+// 安全中间件
+app.use(helmet({
+  contentSecurityPolicy: false
+}));
+app.use(compression());
+
+// 通用速率限制
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15分钟
+  max: 100, // 每个IP最多100个请求
+  message: { error: '请求过于频繁，请稍后再试' }
+});
+
+// 认证相关速率限制（更严格）
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5, // 15分钟内最多5次尝试
+  message: { error: '登录/注册尝试过多，请15分钟后再试' }
+});
 
 // 中间件
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(generalLimiter);
 
 // 静态文件服务（前端）
 app.use(express.static(path.join(__dirname, '../dist')));
@@ -109,7 +139,7 @@ db.serialize(() => {
         ['老年常见疾病预防指南', '高血压、糖尿病等老年病的预防', '<h2>老年常见疾病预防</h2><p>预防胜于治疗。</p>', 'health', 7568],
         ['社保退休年龄最新规定', '2025年社保退休年龄规定一览', '<h2>社保退休年龄规定</h2><p>2025年社保退休年龄规定如下。</p>', 'policy', 15230]
       ];
-      
+
       articles.forEach(article => {
         db.run(
           "INSERT INTO articles (title, summary, content, category, view_count) VALUES (?, ?, ?, ?, ?)",
@@ -135,11 +165,11 @@ db.serialize(() => {
 // 邮件发送配置
 const createTransporter = () => {
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.qq.com',
-    port: process.env.SMTP_PORT || 465,
+    host: process.env.SMTP_HOST || 'smtp.163.com',
+    port: parseInt(process.env.SMTP_PORT) || 465,
     secure: true,
     auth: {
-      user: process.env.SMTP_USER || '',
+      user: process.env.SMTP_USER || '18612348799@163.com',
       pass: process.env.SMTP_PASS || ''
     }
   });
@@ -153,11 +183,11 @@ const generateCode = () => {
 // JWT 验证中间件
 const authMiddleware = (req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
-  
+
   if (!token) {
     return res.status(401).json({ error: '请先登录' });
   }
-  
+
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
@@ -193,6 +223,7 @@ app.post('/api/auth/send-code', async (req, res) => {
     [email, phone, code, type, expiresAt.toISOString()],
     async (err) => {
       if (err) {
+        console.error('保存验证码失败:', err);
         return res.status(500).json({ error: '发送验证码失败' });
       }
       
@@ -200,9 +231,15 @@ app.post('/api/auth/send-code', async (req, res) => {
       if (email) {
         try {
           const transporter = createTransporter();
-          if (transporter.options.auth.user) {
-            await transporter.sendMail({
-              from: process.env.SMTP_USER || 'noreply@txghzs.com',
+          console.log('SMTP配置:', {
+            host: process.env.SMTP_HOST || 'smtp.163.com',
+            user: process.env.SMTP_USER || '18612348799@163.com',
+            hasPass: !!process.env.SMTP_PASS
+          });
+          
+          if (process.env.SMTP_PASS) {
+            const info = await transporter.sendMail({
+              from: process.env.SMTP_USER || '18612348799@163.com',
               to: email,
               subject: '【退休规划助手】验证码',
               html: `
@@ -218,33 +255,36 @@ app.post('/api/auth/send-code', async (req, res) => {
                 </div>
               `
             });
+            console.log('邮件发送成功:', info.messageId);
+          } else {
+            console.log('未配置SMTP密码，跳过邮件发送');
           }
         } catch (error) {
-          console.error('Send email error:', error);
+          console.error('发送邮件失败:', error);
         }
       }
       
-      res.json({ 
+      res.json({
         message: '验证码已发送',
-        // 开发环境返回验证码，生产环境应该移除
-        devCode: process.env.NODE_ENV === 'development' ? code : undefined
+        // 开发环境返回验证码
+        devCode: code
       });
     }
   );
 });
 
 // 注册
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   const { username, email, phone, password, code } = req.body;
-  
+
   if (!username || !password) {
     return res.status(400).json({ error: '请填写用户名和密码' });
   }
-  
+
   if (!email && !phone) {
     return res.status(400).json({ error: '请提供邮箱或手机号' });
   }
-  
+
   // 验证验证码
   if (code) {
     db.get(
@@ -254,10 +294,10 @@ app.post('/api/auth/register', async (req, res) => {
         if (!row) {
           return res.status(400).json({ error: '验证码无效或已过期' });
         }
-        
+
         // 标记验证码已使用
         db.run("UPDATE verification_codes SET used = 1 WHERE id = ?", [row.id]);
-        
+
         // 创建用户
         const hashedPassword = await bcrypt.hash(password, 10);
         db.run(
@@ -270,7 +310,7 @@ app.post('/api/auth/register', async (req, res) => {
               }
               return res.status(500).json({ error: '注册失败' });
             }
-            
+
             const token = jwt.sign({ id: this.lastID, username, isAdmin: false }, JWT_SECRET, { expiresIn: '7d' });
             res.json({ message: '注册成功', token, user: { id: this.lastID, username, email, phone } });
           }
@@ -290,7 +330,7 @@ app.post('/api/auth/register', async (req, res) => {
           }
           return res.status(500).json({ error: '注册失败' });
         }
-        
+
         const token = jwt.sign({ id: this.lastID, username, isAdmin: false }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ message: '注册成功', token, user: { id: this.lastID, username, email, phone } });
       }
@@ -299,13 +339,13 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // 登录
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', authLimiter, (req, res) => {
   const { username, password } = req.body;
-  
+
   if (!username || !password) {
     return res.status(400).json({ error: '请填写用户名和密码' });
   }
-  
+
   db.get(
     "SELECT * FROM users WHERE username = ? OR email = ? OR phone = ?",
     [username, username, username],
@@ -313,18 +353,18 @@ app.post('/api/auth/login', (req, res) => {
       if (err || !user) {
         return res.status(401).json({ error: '用户名或密码错误' });
       }
-      
+
       const isValid = await bcrypt.compare(password, user.password);
       if (!isValid) {
         return res.status(401).json({ error: '用户名或密码错误' });
       }
-      
+
       const token = jwt.sign(
         { id: user.id, username: user.username, isAdmin: user.is_admin === 1 },
         JWT_SECRET,
         { expiresIn: '7d' }
       );
-      
+
       res.json({
         message: '登录成功',
         token,
@@ -353,10 +393,10 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 // 更新用户档案
 app.put('/api/auth/profile', authMiddleware, (req, res) => {
   const { gender, birth_date, job_type, location_code, salary, account_balance, contribution_years, contribution_index } = req.body;
-  
+
   db.run(
-    `UPDATE users SET 
-      gender = ?, birth_date = ?, job_type = ?, location_code = ?, 
+    `UPDATE users SET
+      gender = ?, birth_date = ?, job_type = ?, location_code = ?,
       salary = ?, account_balance = ?, contribution_years = ?, contribution_index = ?,
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
@@ -380,24 +420,63 @@ app.delete('/api/auth/account', authMiddleware, (req, res) => {
   });
 });
 
+// 重置密码
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { phone, email, code, password } = req.body;
+
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: '密码至少6位' });
+  }
+
+  // 验证验证码
+  db.get(
+    "SELECT * FROM verification_codes WHERE (email = ? OR phone = ?) AND code = ? AND type = 'reset' AND used = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
+    [email, phone, code, new Date().toISOString()],
+    async (err, row) => {
+      if (!row) {
+        return res.status(400).json({ error: '验证码无效或已过期' });
+      }
+
+      // 标记验证码已使用
+      db.run("UPDATE verification_codes SET used = 1 WHERE id = ?", [row.id]);
+
+      // 更新密码
+      const hashedPassword = await bcrypt.hash(password, 10);
+      db.run(
+        "UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ? OR phone = ?",
+        [hashedPassword, email, phone],
+        function(err) {
+          if (err) {
+            return res.status(500).json({ error: '重置密码失败' });
+          }
+          if (this.changes === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+          }
+          res.json({ message: '密码重置成功' });
+        }
+      );
+    }
+  );
+});
+
 // ==================== 文章相关API ====================
 
 // 获取文章列表
 app.get('/api/articles', (req, res) => {
   const { category, page = 1, limit = 10 } = req.query;
   const offset = (page - 1) * limit;
-  
+
   let sql = "SELECT id, title, summary, category, cover_image, view_count, created_at FROM articles WHERE is_published = 1";
   let params = [];
-  
+
   if (category) {
     sql += " AND category = ?";
     params.push(category);
   }
-  
+
   sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
   params.push(parseInt(limit), offset);
-  
+
   db.all(sql, params, (err, articles) => {
     if (err) {
       return res.status(500).json({ error: '获取文章列表失败' });
@@ -412,10 +491,10 @@ app.get('/api/articles/:id', (req, res) => {
     if (err || !article) {
       return res.status(404).json({ error: '文章不存在' });
     }
-    
+
     // 增加浏览量
     db.run("UPDATE articles SET view_count = view_count + 1 WHERE id = ?", [req.params.id]);
-    
+
     res.json(article);
   });
 });
@@ -425,9 +504,9 @@ app.get('/api/articles/:id', (req, res) => {
 // 获取收藏列表
 app.get('/api/favorites', authMiddleware, (req, res) => {
   db.all(
-    `SELECT f.id as favorite_id, a.* FROM favorites f 
-     JOIN articles a ON f.article_id = a.id 
-     WHERE f.user_id = ? 
+    `SELECT f.id as favorite_id, a.* FROM favorites f
+     JOIN articles a ON f.article_id = a.id
+     WHERE f.user_id = ?
      ORDER BY f.created_at DESC`,
     [req.user.id],
     (err, favorites) => {
@@ -442,7 +521,7 @@ app.get('/api/favorites', authMiddleware, (req, res) => {
 // 添加收藏
 app.post('/api/favorites', authMiddleware, (req, res) => {
   const { article_id } = req.body;
-  
+
   db.run(
     "INSERT INTO favorites (user_id, article_id) VALUES (?, ?)",
     [req.user.id, article_id],
@@ -473,7 +552,7 @@ app.delete('/api/favorites/:article_id', authMiddleware, (req, res) => {
 
 // 获取所有用户
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
-  db.all("SELECT id, username, email, phone, gender, birth_date, job_type, is_verified, is_admin, created_at FROM users", (err, users) => {
+  db.all("SELECT id, username, email, phone, gender, birth_date, job_type, location_code, salary, account_balance, contribution_years, contribution_index, is_verified, is_admin, created_at FROM users", (err, users) => {
     if (err) {
       return res.status(500).json({ error: '获取用户列表失败' });
     }
@@ -491,10 +570,114 @@ app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, (req, res) =
   });
 });
 
+// 管理员测试路由
+// 管理员修改密码
+app.post('/api/admin/change-password', authMiddleware, adminMiddleware, async (req, res) => {
+  console.log('=== CHANGE PASSWORD ROUTE CALLED ===');
+  console.log('Body:', req.body);
+  console.log('User:', req.user);
+  
+  const { oldPassword, newPassword } = req.body;
+
+  if (!oldPassword || !newPassword) {
+    return res.status(400).json({ error: '请填写原密码和新密码' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: '新密码长度不能少于6位' });
+  }
+
+  // 获取当前用户
+  db.get("SELECT * FROM users WHERE id = ?", [req.user.id], async (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    // 验证原密码
+    const isValid = await bcrypt.compare(oldPassword, user.password);
+    if (!isValid) {
+      return res.status(400).json({ error: '原密码错误' });
+    }
+
+    // 更新密码
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    db.run(
+      "UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [hashedPassword, req.user.id],
+      (err) => {
+        if (err) {
+          return res.status(500).json({ error: '修改密码失败' });
+        }
+        res.json({ message: '密码修改成功' });
+      }
+    );
+  });
+});
+
 // 创建文章
+// 获取管理员文章列表
+app.get('/api/admin/articles', authMiddleware, adminMiddleware, (req, res) => {
+  const { category, keyword, page = 1, limit = 20 } = req.query;
+  const offset = (page - 1) * limit;
+  
+  let sql = "SELECT a.*, u.username as author_name FROM articles a LEFT JOIN users u ON a.author_id = u.id WHERE 1=1";
+  let params = [];
+  
+  if (category) {
+    sql += " AND a.category = ?";
+    params.push(category);
+  }
+  
+  if (keyword) {
+    sql += " AND (a.title LIKE ? OR a.summary LIKE ?)";
+    params.push(`%${keyword}%`);
+  }
+  
+  sql += " ORDER BY a.created_at DESC LIMIT ? OFFSET ?";
+  params.push(parseInt(limit), offset);
+  
+  db.all(sql, params, (err, articles) => {
+    if (err) {
+      return res.status(500).json({ error: '获取文章列表失败' });
+    }
+    
+    let countSql = "SELECT COUNT(*) as total FROM articles WHERE 1=1";
+    let countParams = [];
+    
+    if (category) {
+      countSql += " AND category = ?";
+      countParams.push(category);
+    }
+    
+    if (keyword) {
+      countSql += " AND (title LIKE ? OR summary LIKE ?)";
+      countParams.push(`%${keyword}%`);
+    }
+    
+    db.get(countSql, countParams, (err, row) => {
+      res.json({
+        list: articles,
+        total: row?.total || 0,
+        page: parseInt(page),
+        limit: parseInt(limit)
+      });
+    });
+  });
+});
+
+// 获取单篇文章（管理员）
+app.get('/api/admin/articles/:id', authMiddleware, adminMiddleware, (req, res) => {
+  db.get("SELECT * FROM articles WHERE id = ?", [req.params.id], (err, article) => {
+    if (err || !article) {
+      return res.status(404).json({ error: '文章不存在' });
+    }
+    res.json(article);
+  });
+});
+
 app.post('/api/admin/articles', authMiddleware, adminMiddleware, (req, res) => {
   const { title, summary, content, category, cover_image, is_published } = req.body;
-  
+
   db.run(
     "INSERT INTO articles (title, summary, content, category, cover_image, is_published, author_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [title, summary, content, category, cover_image, is_published ? 1 : 0, req.user.id],
@@ -510,7 +693,7 @@ app.post('/api/admin/articles', authMiddleware, adminMiddleware, (req, res) => {
 // 更新文章
 app.put('/api/admin/articles/:id', authMiddleware, adminMiddleware, (req, res) => {
   const { title, summary, content, category, cover_image, is_published } = req.body;
-  
+
   db.run(
     "UPDATE articles SET title = ?, summary = ?, content = ?, category = ?, cover_image = ?, is_published = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     [title, summary, content, category, cover_image, is_published ? 1 : 0, req.params.id],
@@ -536,16 +719,16 @@ app.delete('/api/admin/articles/:id', authMiddleware, adminMiddleware, (req, res
 // 获取统计数据
 app.get('/api/admin/stats', authMiddleware, adminMiddleware, (req, res) => {
   const stats = {};
-  
+
   db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
     stats.users = row?.count || 0;
-    
+
     db.get("SELECT COUNT(*) as count FROM articles", (err, row) => {
       stats.articles = row?.count || 0;
-      
+
       db.get("SELECT SUM(view_count) as total FROM articles", (err, row) => {
         stats.totalViews = row?.total || 0;
-        
+
         res.json(stats);
       });
     });
@@ -569,13 +752,13 @@ app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
 // 更新系统配置
 app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   const settings = req.body;
-  
+
   const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
   Object.entries(settings).forEach(([key, value]) => {
     stmt.run(key, value);
   });
   stmt.finalize();
-  
+
   res.json({ message: '配置已更新' });
 });
 

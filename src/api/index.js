@@ -54,7 +54,10 @@ export const authAPI = {
   updateProfile: (data) => api.put('/auth/profile', data),
   
   // 注销账号
-  deleteAccount: () => api.delete('/auth/account')
+  deleteAccount: () => api.delete('/auth/account'),
+  
+  // 重置密码
+  resetPassword: (data) => api.post('/auth/reset-password', data)
 }
 
 // ==================== 文章相关 ====================

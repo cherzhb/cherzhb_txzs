@@ -1,235 +1,325 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { showToast, showLoadingToast, closeToast } from 'vant'
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { showToast, showSuccessToast } from 'vant'
 import { useUserStore } from '@/stores/user'
 import { authAPI } from '@/api'
 
 const router = useRouter()
-const route = useRoute()
 const userStore = useUserStore()
 
-const activeTab = ref('email') // phone | email
+// 模式：login 或 register
+const mode = ref('login')
+
+// 登录方式：phone 或 email
+const loginType = ref('email')
+
+// 表单数据
+const username = ref('')
 const phone = ref('')
 const email = ref('')
-const code = ref('')
 const password = ref('')
-const step = ref(1) // 1: 输入账号 2: 验证码设置密码
+const confirmPassword = ref('')
+const code = ref('')
+const codeSent = ref(false)
 const countdown = ref(0)
 const loading = ref(false)
-
-onMounted(() => {
-  // 检查是否已登录
-  if (userStore.isLoggedIn) {
-    const redirect = route.query.redirect || '/'
-    router.push(redirect)
-  }
-})
+const agree = ref(false)
 
 // 发送验证码
 const sendCode = async () => {
-  let account = activeTab.value === 'phone' ? phone.value : email.value
-  
-  if (!account) {
-    showToast('请输入手机号或邮箱')
+  if (loginType.value === 'phone' && !phone.value) {
+    showToast('请输入手机号')
+    return
+  }
+  if (loginType.value === 'email' && !email.value) {
+    showToast('请输入邮箱')
     return
   }
   
-  // 验证手机号格式
-  if (activeTab.value === 'phone') {
-    const phoneReg = /^1[3-9]\d{9}$/
-    if (!phoneReg.test(account)) {
-      showToast('请输入正确的手机号')
-      return
-    }
-  }
-  
-  // 验证邮箱格式
-  if (activeTab.value === 'email') {
-    const emailReg = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailReg.test(account)) {
-      showToast('请输入正确的邮箱')
-      return
-    }
-  }
-  
-  loading.value = true
   try {
-    const res = await authAPI.sendCode({
-      email: activeTab.value === 'email' ? email.value : undefined,
-      phone: activeTab.value === 'phone' ? phone.value : undefined
+    await authAPI.sendCode({
+      phone: loginType.value === 'phone' ? phone.value : undefined,
+      email: loginType.value === 'email' ? email.value : undefined
     })
-    
-    showToast('验证码已发送')
-    step.value = 2
-    
-    // 开始倒计时
+    showSuccessToast('验证码已发送')
+    codeSent.value = true
     countdown.value = 60
     const timer = setInterval(() => {
       countdown.value--
       if (countdown.value <= 0) {
         clearInterval(timer)
+        codeSent.value = false
       }
     }, 1000)
   } catch (err) {
     showToast(err.error || '发送失败')
+  }
+}
+
+// 登录
+const handleLogin = async () => {
+  if (!username.value) {
+    showToast('请输入用户名/手机号/邮箱')
+    return
+  }
+  if (!password.value) {
+    showToast('请输入密码')
+    return
+  }
+  
+  loading.value = true
+  
+  try {
+    const res = await authAPI.login({ 
+      username: username.value.trim(), 
+      password: password.value 
+    })
+    localStorage.setItem('token', res.token)
+    userStore.setUser(res.user)
+    showSuccessToast('登录成功')
+    router.push('/')
+  } catch (err) {
+    console.error('登录错误:', err)
+    showToast(err.error || '登录失败')
   } finally {
     loading.value = false
   }
 }
 
-// 提交表单（登录/注册）
-const submitForm = async () => {
-  if (!code.value) {
-    showToast('请输入验证码')
+// 跳转找回密码
+const goResetPassword = () => {
+  router.push('/reset-password')
+}
+
+// 注册
+const handleRegister = async () => {
+  if (!username.value) {
+    showToast('请输入用户名')
+    return
+  }
+  if (loginType.value === 'phone' && !phone.value) {
+    showToast('请输入手机号')
+    return
+  }
+  if (loginType.value === 'email' && !email.value) {
+    showToast('请输入邮箱')
     return
   }
   if (!password.value) {
-    showToast('请设置密码')
+    showToast('请输入密码')
     return
   }
-  if (password.value.length < 8) {
-    showToast('密码至少8位')
+  if (password.value !== confirmPassword.value) {
+    showToast('两次密码不一致')
+    return
+  }
+  if (!agree.value) {
+    showToast('请阅读并同意用户协议')
     return
   }
   
   loading.value = true
   try {
-    const data = {
-      username: activeTab.value === 'phone' ? phone.value : email.value.split('@')[0],
-      email: activeTab.value === 'email' ? email.value : undefined,
-      phone: activeTab.value === 'phone' ? phone.value : undefined,
+    const res = await authAPI.register({
+      username: username.value,
+      phone: loginType.value === 'phone' ? phone.value : undefined,
+      email: loginType.value === 'email' ? email.value : undefined,
       password: password.value,
-      code: code.value
-    }
-    
-    const res = await authAPI.register(data)
-    
-    // 保存登录状态
+      code: code.value || undefined
+    })
     localStorage.setItem('token', res.token)
-    userStore.login(res.user)
-    
-    showToast('登录成功')
-    setTimeout(() => {
-      const redirect = route.query.redirect || '/'
-      router.push(redirect)
-    }, 1000)
+    userStore.setUser(res.user)
+    showSuccessToast('注册成功')
+    router.push('/profile')
   } catch (err) {
-    // 如果注册失败，尝试登录
-    try {
-      const loginRes = await authAPI.login({
-        username: activeTab.value === 'phone' ? phone.value : email.value,
-        password: password.value
-      })
-      
-      localStorage.setItem('token', loginRes.token)
-      userStore.login(loginRes.user)
-      
-      showToast('登录成功')
-      setTimeout(() => {
-        const redirect = route.query.redirect || '/'
-        router.push(redirect)
-      }, 1000)
-    } catch (loginErr) {
-      showToast(loginErr.error || '登录失败')
-    }
+    showToast(err.error || '注册失败')
   } finally {
     loading.value = false
   }
+}
+
+// 切换模式
+const switchMode = (newMode) => {
+  mode.value = newMode
+  username.value = ''
+  phone.value = ''
+  email.value = ''
+  password.value = ''
+  confirmPassword.value = ''
+  code.value = ''
 }
 </script>
 
 <template>
   <div class="login-page">
-    <!-- Logo -->
-    <div class="logo">
-      <div class="logo-icon">👴</div>
-      <h1>退休规划助手</h1>
-      <p>科学规划 · 快乐退休</p>
+    <!-- 头部 -->
+    <div class="header">
+      <div class="logo">👴</div>
+      <h1 class="title">退休规划助手</h1>
+      <p class="subtitle">科学规划 · 快乐退休</p>
     </div>
     
-    <!-- 步骤1：输入账号 -->
-    <div class="form-container">
-      <h2 class="form-title">{{ step === 1 ? '登录 / 注册' : '验证账号' }}</h2>
+    <!-- 切换标签 -->
+    <div class="tab-switch">
+      <div 
+        :class="['tab', { active: mode === 'login' }]" 
+        @click="switchMode('login')"
+      >
+        登录
+      </div>
+      <div 
+        :class="['tab', { active: mode === 'register' }]" 
+        @click="switchMode('register')"
+      >
+        注册
+      </div>
+    </div>
+    
+    <!-- 登录表单 -->
+    <div v-if="mode === 'login'" class="form-card">
+      <van-cell-group inset>
+        <van-field 
+          v-model="username" 
+          label="" 
+          placeholder="请输入用户名/手机号/邮箱"
+          left-icon="user-o"
+          clearable
+        />
+        <van-field 
+          v-model="password" 
+          type="password" 
+          label="" 
+          placeholder="请输入密码"
+          left-icon="lock"
+          clearable
+        />
+      </van-cell-group>
       
-      <!-- 步骤1 -->
-      <div v-if="step === 1">
-        <van-tabs v-model:active="activeTab">
-          <van-tab title="邮箱" name="email">
-            <van-field
-              v-model="email"
-              type="email"
-              label="邮箱"
-              placeholder="请输入邮箱地址"
-            />
-          </van-tab>
-          <van-tab title="手机号" name="phone">
-            <van-field
-              v-model="phone"
-              type="tel"
-              label="手机号"
-              placeholder="请输入11位手机号"
-              maxlength="11"
-            />
-          </van-tab>
-        </van-tabs>
-        
-        <div class="next-step">
-          <van-button type="primary" block :loading="loading" @click="sendCode">
-            获取验证码
-          </van-button>
-        </div>
+      <van-button 
+        type="primary" 
+        block 
+        size="large" 
+        :loading="loading"
+        @click="handleLogin"
+      >
+        登录
+      </van-button>
+      
+      <div class="footer-links">
+        <span class="link" @click="goResetPassword">忘记密码？</span>
+        <span @click="switchMode('register')">没有账号？立即注册</span>
+      </div>
+    </div>
+    
+    <!-- 注册表单 -->
+    <div v-else class="form-card">
+      <!-- 登录方式切换 -->
+      <div class="login-type-switch">
+        <span 
+          :class="['type-btn', { active: loginType === 'phone' }]" 
+          @click="loginType = 'phone'"
+        >
+          📱 手机号
+        </span>
+        <span 
+          :class="['type-btn', { active: loginType === 'email' }]" 
+          @click="loginType = 'email'"
+        >
+          📧 邮箱
+        </span>
       </div>
       
-      <!-- 步骤2 -->
-      <div v-if="step === 2">
-        <van-field
-          v-model="code"
-          type="number"
-          label="验证码"
-          placeholder="请输入6位验证码"
-          maxlength="6"
-          center
+      <van-cell-group inset>
+        <van-field 
+          v-model="username" 
+          label="" 
+          placeholder="请输入用户名"
+          left-icon="user-o"
+          clearable
+        />
+        
+        <van-field 
+          v-if="loginType === 'phone'"
+          v-model="phone" 
+          type="tel" 
+          label="" 
+          placeholder="请输入手机号"
+          left-icon="phone-o"
+          clearable
+        />
+        
+        <van-field 
+          v-if="loginType === 'email'"
+          v-model="email" 
+          type="email" 
+          label="" 
+          placeholder="请输入邮箱"
+          left-icon="envelop-o"
+          clearable
+        />
+        
+        <van-field 
+          v-model="password" 
+          type="password" 
+          label="" 
+          placeholder="请输入密码"
+          left-icon="lock"
+          clearable
+        />
+        
+        <van-field 
+          v-model="confirmPassword" 
+          type="password" 
+          label="" 
+          placeholder="请再次输入密码"
+          left-icon="lock"
+          clearable
+        />
+        
+        <van-field 
+          v-model="code" 
+          label="" 
+          placeholder="请输入验证码"
+          left-icon="shield-o"
+          clearable
         >
           <template #button>
-            <van-button
-              size="small"
-              type="primary"
+            <van-button 
+              size="small" 
+              type="primary" 
               :disabled="countdown > 0"
               @click="sendCode"
             >
-              {{ countdown > 0 ? `${countdown}秒` : '重新发送' }}
+              {{ countdown > 0 ? `${countdown}秒后重发` : '获取验证码' }}
             </van-button>
           </template>
         </van-field>
-        
-        <van-field
-          v-model="password"
-          type="password"
-          label="设置密码"
-          placeholder="8-20位字符"
-        />
-        
-        <div class="tips">
-          <van-icon name="info-o" />
-          <span>验证码将发送到您的{{ activeTab === 'phone' ? '手机' : '邮箱' }}</span>
-        </div>
-        
-        <div class="next-step">
-          <van-button type="primary" block :loading="loading" @click="submitForm">
-            登录 / 注册
-          </van-button>
-        </div>
-        
-        <div class="back-btn" @click="step = 1">
-          返回上一步
-        </div>
+      </van-cell-group>
+      
+      <!-- 用户协议 -->
+      <div class="agreement">
+        <van-checkbox v-model="agree" shape="square" icon-size="16px">
+          我已阅读并同意
+          <span class="link">《用户协议》</span>
+          和
+          <span class="link">《隐私政策》</span>
+        </van-checkbox>
       </div>
-    </div>
-    
-    <!-- 管理员入口 -->
-    <div class="admin-link">
-      <a href="/admin.html">管理员登录</a>
+      
+      <van-button 
+        type="primary" 
+        block 
+        size="large" 
+        :loading="loading"
+        @click="handleRegister"
+      >
+        注册
+      </van-button>
+      
+      <div class="footer-links">
+        <span @click="switchMode('login')">已有账号？立即登录</span>
+      </div>
     </div>
   </div>
 </template>
@@ -237,81 +327,119 @@ const submitForm = async () => {
 <style scoped>
 .login-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  background: linear-gradient(180deg, #667eea 0%, #764ba2 40%, #f7f8fa 40%);
+  padding: 16px;
+  padding-bottom: 80px;
+}
+
+.header {
+  text-align: center;
+  color: white;
+  padding: 30px 0 20px;
 }
 
 .logo {
-  text-align: center;
-  color: white;
-  padding: 40px 0;
-}
-
-.logo-icon {
   font-size: 60px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
-.logo h1 {
+.title {
   font-size: 28px;
+  font-weight: bold;
   margin-bottom: 8px;
 }
 
-.logo p {
+.subtitle {
   font-size: 14px;
   opacity: 0.9;
 }
 
-.form-container {
+.tab-switch {
+  display: flex;
+  background: white;
+  border-radius: 25px;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 12px 0;
+  border-radius: 22px;
+  font-size: 16px;
+  color: #969799;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: bold;
+}
+
+.form-card {
   background: white;
   border-radius: 16px;
-  padding: 24px;
-  margin-top: 20px;
+  padding: 20px;
 }
 
-.form-title {
-  font-size: 20px;
-  font-weight: bold;
-  color: #323233;
-  margin-bottom: 20px;
-  text-align: center;
-}
-
-.next-step {
-  margin-top: 24px;
-}
-
-.tips {
+.login-type-switch {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #ff976a;
-  padding: 12px;
-  background: #fff7ed;
-  border-radius: 8px;
-  margin-top: 16px;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
-.back-btn {
-  text-align: center;
-  color: #1989fa;
-  margin-top: 16px;
+.type-btn {
+  padding: 8px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  color: #969799;
   cursor: pointer;
+  background: #f7f8fa;
+  transition: all 0.3s;
 }
 
-.admin-link {
+.type-btn.active {
+  background: #e8f4fd;
+  color: #1989fa;
+}
+
+:deep(.van-cell-group--inset) {
+  margin: 0 0 20px;
+}
+
+:deep(.van-field) {
+  padding: 14px 16px;
+}
+
+:deep(.van-field__control) {
+  font-size: 16px;
+}
+
+.agreement {
+  margin-bottom: 16px;
+}
+
+.agreement :deep(.van-checkbox__label) {
+  font-size: 12px;
+  color: #969799;
+}
+
+.link {
+  color: #1989fa;
+}
+
+.footer-links {
   text-align: center;
   margin-top: 20px;
-}
-
-.admin-link a {
-  color: rgba(255, 255, 255, 0.8);
   font-size: 14px;
-  text-decoration: none;
-}
-
-.admin-link a:hover {
-  color: white;
+  color: #1989fa;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
 }
 </style>
