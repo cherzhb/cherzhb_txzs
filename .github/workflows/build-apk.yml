@@ -26,7 +26,7 @@ jobs:
         continue-on-error: false
 
       - name: Build web app
-        run: npm run build
+        run: npx vite build
 
       - name: Setup Java
         uses: actions/setup-java@v4
