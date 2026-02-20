@@ -19,12 +19,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Clean install dependencies
         run: |
-          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          rm -rf node_modules package-lock.json
+          npm install
 
       - name: Build web app
-        run: npx vite build
+        run: npm run build
 
       - name: Setup Java
         uses: actions/setup-java@v4
