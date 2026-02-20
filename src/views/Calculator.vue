@@ -1,6 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onActivated } from 'vue'
-import { showNotify, showSuccessToast } from 'vant'
+import { ref, computed, onMounted, onActivated, nextTick, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { authAPI } from '@/api'
 import dayjs from 'dayjs'
@@ -21,714 +20,717 @@ const locationSalaries = {
   '320500': { name: '苏州', salary: 10500 }
 }
 
-// 用户信息（从后端获取）
-const userInfo = ref({
-  gender: 1,
-  birthDate: '',
-  salary: 0,
-  accountBalance: 0,
-  contributionYears: 0,
-  contributionIndex: 1.0,
-  locationCode: '110000',
-  jobType: 1
-})
+// 用户信息
+const gender = ref(1)
+const birthDate = ref('')
+const salary = ref(10000)
+const accountBalance = ref(0)
+const contributionYears = ref(15)
+const contributionIndex = ref(1.0)
+const locationCode = ref('110000')
+const jobType = ref(1)
 
-// 计算结果
-const showResult = ref(false)
-const result = ref(null)
+// 弹窗控制
+const showGenderPicker = ref(false)
+const showDatePicker = ref(false)
+const showSalaryPicker = ref(false)
+const showBalancePicker = ref(false)
+const showYearsPicker = ref(false)
+const showIndexPicker = ref(false)
+const showLocationPicker = ref(false)
+
+const birthDateValue = ref(['1990', '01', '01'])
+
+// 退休年龄选项
+const yearsOptions = Array.from({ length: 46 }, (_, i) => ({
+  text: i + '年',
+  value: i
+}))
+
+// 缴费指数选项
+const indexOptions = Array.from({ length: 20 }, (_, i) => ({
+  text: (0.6 + i * 0.1).toFixed(1),
+  value: 0.6 + i * 0.1
+}))
+
+// 地区选项
+const locationOptions = Object.entries(locationSalaries).map(([code, info]) => ({
+  text: info.name,
+  value: code
+}))
 
 // 计算年龄
 const age = computed(() => {
-  if (!userInfo.value.birthDate) return null
-  return dayjs().diff(dayjs(userInfo.value.birthDate), 'year')
+  if (!birthDate.value) return 30
+  return dayjs().diff(dayjs(birthDate.value), 'year')
 })
 
-// 计算退休年龄和月份（根据性别和工作类型自动判断）
+// 计算退休年龄和月份
 const retirementInfo = computed(() => {
-  const gender = userInfo.value.gender
-  const jobType = userInfo.value.jobType
-  
-  // 男性：60岁
-  if (gender === 1) {
-    return { age: 60, months: 139, text: '60岁（男职工）' }
+  if (gender.value === 1) {
+    return { age: 60, months: 139, text: '60岁' }
   }
-  
-  // 女性
-  if (gender === 2) {
-    // 女干部/公务员/事业单位：55岁
-    if (jobType === 3 || jobType === 4) {
-      return { age: 55, months: 170, text: '55岁（女干部）' }
+  if (gender.value === 2) {
+    if (jobType.value === 3 || jobType.value === 4) {
+      return { age: 55, months: 170, text: '55岁' }
     }
-    // 女工人/灵活就业：50岁
-    return { age: 50, months: 195, text: '50岁（女工人）' }
+    return { age: 50, months: 195, text: '50岁' }
   }
-  
   return { age: 60, months: 139, text: '60岁' }
 })
 
-// 距离退休年数
 const yearsToRetire = computed(() => {
-  if (!age.value) return null
   return Math.max(0, retirementInfo.value.age - age.value)
 })
 
-// 预计退休日期
-const retirementDate = computed(() => {
-  if (!userInfo.value.birthDate) return ''
-  return dayjs(userInfo.value.birthDate).add(retirementInfo.value.age, 'year').format('YYYY年MM月')
-})
-
-// 参保地名称和平均工资
 const locationInfo = computed(() => {
-  return locationSalaries[userInfo.value.locationCode] || locationSalaries['110000']
+  return locationSalaries[locationCode.value] || locationSalaries['110000']
 })
 
-// 从后端加载用户档案
-const loadUserProfile = async () => {
-  if (!userStore.isLoggedIn) {
-    showNotify({ type: 'warning', message: '请先登录' })
-    return
-  }
+// ========== 实时计算养老金 ==========
+const pensionResult = computed(() => {
+  const yearsToRetireVal = yearsToRetire.value
+  const currentAvgSalary = locationInfo.value.salary
+  const salaryGrowthRate = 0.03
+  const futureAvgSalary = currentAvgSalary * Math.pow(1 + salaryGrowthRate, yearsToRetireVal)
   
+  const totalContributionYears = contributionYears.value + yearsToRetireVal
+  const index = contributionIndex.value
+  
+  const monthlyDeposit = salary.value * 0.08
+  const monthsRemaining = yearsToRetireVal * 12
+  const futureAccountBalance = accountBalance.value + monthlyDeposit * monthsRemaining * (1 + 0.03 / 12 * monthsRemaining / 2)
+
+  const months = retirementInfo.value.months
+  const basicPension = futureAvgSalary * (1 + index) / 2 * totalContributionYears * 0.01
+  const personalPension = futureAccountBalance / months
+  const totalPension = basicPension + personalPension
+
+  return {
+    basicPension: Math.round(basicPension),
+    personalPension: Math.round(personalPension),
+    totalPension: Math.round(totalPension),
+    basicPensionPercent: totalPension > 0 ? Math.round((basicPension / totalPension) * 100) : 0
+  }
+})
+
+// 加载用户档案
+const loadUserProfile = async () => {
+  if (!userStore.isLoggedIn) return
   try {
     const data = await authAPI.getMe()
     if (data) {
-      userInfo.value = {
-        gender: data.gender || 1,
-        birthDate: data.birth_date || '',
-        salary: data.salary || 0,
-        accountBalance: data.account_balance || 0,
-        contributionYears: data.contribution_years || 0,
-        contributionIndex: data.contribution_index || 1.0,
-        locationCode: data.location_code || '110000',
-        jobType: data.job_type || 1
+      gender.value = data.gender || 1
+      birthDate.value = data.birth_date || ''
+      if (data.birth_date) {
+        birthDateValue.value = data.birth_date.split('-')
       }
+      salary.value = data.salary || 10000
+      accountBalance.value = data.account_balance || 0
+      contributionYears.value = data.contribution_years || 15
+      contributionIndex.value = data.contribution_index || 1.0
+      locationCode.value = data.location_code || '110000'
+      jobType.value = data.job_type || 1
     }
   } catch (err) {
     console.error('加载档案失败:', err)
   }
 }
 
-// 页面加载和重新激活时获取用户信息
-onMounted(loadUserProfile)
+onMounted(() => {
+  loadUserProfile()
+  nextTick(() => {
+    const items = document.querySelectorAll('.stagger')
+    items.forEach((item, i) => {
+      setTimeout(() => {
+        item.classList.add('animate')
+      }, i * 80)
+    })
+  })
+})
+
 onActivated(loadUserProfile)
 
-// 计算退休工资
-const calculate = () => {
-  // 验证必要信息
-  if (!userInfo.value.birthDate) {
-    showNotify({ type: 'warning', message: '请先在个人档案中填写出生日期' })
-    return
-  }
-  if (userInfo.value.contributionYears < 15) {
-    showNotify({ type: 'warning', message: '缴费年限不足15年' })
-    return
-  }
-  if (!userInfo.value.salary || userInfo.value.salary <= 0) {
-    showNotify({ type: 'warning', message: '请先在个人档案中填写当前工资' })
-    return
-  }
-  
-  const yearsToRetireVal = yearsToRetire.value
-  
-  // 当前社平工资
-  const currentAvgSalary = locationInfo.value.salary
-  
-  // 假设工资增长率3%
-  const salaryGrowthRate = 0.03
-  // 预计退休时的社平工资
-  const futureAvgSalary = currentAvgSalary * Math.pow(1 + salaryGrowthRate, yearsToRetireVal)
-  
-  // 总缴费年限 = 已缴费年限 + 距退休年数
-  const totalContributionYears = userInfo.value.contributionYears + yearsToRetireVal
-  
-  // 缴费指数
-  const index = userInfo.value.contributionIndex
-  
-  // 个人账户余额按当前工资8%继续缴纳，假设年利率3%
-  const monthlyDeposit = userInfo.value.salary * 0.08
-  const monthsRemaining = yearsToRetireVal * 12
-  const futureAccountBalance = userInfo.value.accountBalance + 
-    monthlyDeposit * monthsRemaining * (1 + 0.03 / 12 * monthsRemaining / 2)
-  
-  // 计发月数
-  const months = retirementInfo.value.months
-  
-  // 基础养老金 = 退休时社平工资 × (1 + 缴费指数) / 2 × 缴费年限 × 1%
-  const basicPension = futureAvgSalary * (1 + index) / 2 * totalContributionYears * 0.01
-  
-  // 个人账户养老金 = 个人账户余额 / 计发月数
-  const personalPension = futureAccountBalance / months
-  
-  // 总养老金
-  const totalPension = basicPension + personalPension
-  
-  result.value = {
-    basicPension: Math.round(basicPension),
-    personalPension: Math.round(personalPension),
-    totalPension: Math.round(totalPension),
-    totalContributionYears: Math.round(totalContributionYears),
-    futureAccountBalance: Math.round(futureAccountBalance),
-    futureAvgSalary: Math.round(futureAvgSalary),
-    retirementAge: retirementInfo.value.text,
-    retirementDate: retirementDate.value,
-    yearsToRetire: yearsToRetireVal
-  }
-  
-  showResult.value = true
-  showSuccessToast('计算完成')
+// 选择器确认
+const onConfirmGender = ({ selectedValues }) => {
+  gender.value = selectedValues[0]
+  showGenderPicker.value = false
 }
 
-// 格式化金额
+const onConfirmDate = ({ selectedValues }) => {
+  birthDateValue.value = selectedValues
+  birthDate.value = selectedValues.join('-')
+  showDatePicker.value = false
+}
+
+const onConfirmYears = ({ selectedValues }) => {
+  contributionYears.value = selectedValues[0]
+  showYearsPicker.value = false
+}
+
+const onConfirmIndex = ({ selectedValues }) => {
+  contributionIndex.value = selectedValues[0]
+  showIndexPicker.value = false
+}
+
+const onConfirmLocation = ({ selectedValues }) => {
+  locationCode.value = selectedValues[0]
+  showLocationPicker.value = false
+}
+
+// 工资输入
+const salaryInput = ref(String(salary.value))
+const onConfirmSalary = () => {
+  const val = parseInt(salaryInput.value) || 0
+  salary.value = Math.max(0, val)
+  showSalaryPicker.value = false
+}
+
+// 账户余额输入
+const balanceInput = ref(String(accountBalance.value))
+const onConfirmBalance = () => {
+  const val = parseInt(balanceInput.value) || 0
+  accountBalance.value = Math.max(0, val)
+  showBalancePicker.value = false
+}
+
 const formatMoney = (num) => {
   return new Intl.NumberFormat('zh-CN').format(Math.round(num))
 }
 
-// 性别显示
-const genderText = computed(() => {
-  return userInfo.value.gender === 1 ? '男' : '女'
-})
-
-// 工作类型显示
-const jobTypeText = computed(() => {
-  const types = ['', '企业职工', '灵活就业', '公务员', '事业单位']
-  return types[userInfo.value.jobType] || '企业职工'
-})
+const genderText = computed(() => gender.value === 1 ? '男' : '女')
 </script>
 
 <template>
   <div class="calculator-page">
-    <!-- 标题 -->
-    <div class="page-header">
-      <h1 class="title">退休工资计算器</h1>
-      <p class="desc">基于您的个人档案智能推算</p>
+    <div class="page-container">
+      <!-- Header -->
+      <div class="header-section stagger">
+        <h1 class="page-title">养老金测算 <span class="page-subtitle-inline">根据您的情况预估退休金</span></h1>
+      </div>
+
+      <!-- 未登录提示 -->
+      <div v-if="!userStore.isLoggedIn" class="not-logged stagger">
+        <div class="glass-card login-card">
+          <div class="login-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--fg-muted);">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>
+          <p class="login-text">请先登录查看您的退休工资预测</p>
+          <button class="btn-primary" @click="$router.push('/login')">去登录</button>
+        </div>
+      </div>
+
+      <!-- 已登录：直接显示结果 -->
+      <template v-else>
+        <!-- Result Card - 预计每月可领取 -->
+        <div class="result-section stagger">
+          <div class="glass-card result-card glow">
+            <div class="result-header">
+              <p class="result-label">预计每月可领取</p>
+              <div class="result-amount">
+                <span class="currency">¥</span>
+                <span class="number">{{ formatMoney(pensionResult.totalPension) }}</span>
+              </div>
+            </div>
+            
+            <!-- 养老金构成 -->
+            <div class="pension-breakdown">
+              <div class="breakdown-boxes">
+                <div class="breakdown-box basic">
+                  <span class="box-label">基础养老金</span>
+                  <span class="box-value">¥{{ formatMoney(pensionResult.basicPension) }}</span>
+                </div>
+                <div class="breakdown-box personal">
+                  <span class="box-label">个人账户养老金</span>
+                  <span class="box-value">¥{{ formatMoney(pensionResult.personalPension) }}</span>
+                </div>
+              </div>
+              <div class="progress-bar-wrap">
+                <div class="progress-bar">
+                  <div class="progress-basic" :style="{ width: pensionResult.basicPensionPercent + '%' }"></div>
+                  <div class="progress-personal" :style="{ width: (100 - pensionResult.basicPensionPercent) + '%' }"></div>
+                </div>
+                <div class="progress-labels">
+                  <span class="progress-label"><span class="dot basic"></span>基础养老金 {{ pensionResult.basicPensionPercent }}%</span>
+                  <span class="progress-label"><span class="dot personal"></span>个人账户 {{ 100 - pensionResult.basicPensionPercent }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Parameters 测算参数（可修改） -->
+        <div class="params-section stagger">
+          <div class="glass-card">
+            <h3 class="section-title">测算参数</h3>
+            <div class="params-grid">
+              <div class="param-item" @click="showGenderPicker = true">
+                <span class="param-label">性别</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">{{ genderText }}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="param-item" @click="showDatePicker = true">
+                <span class="param-label">出生日期</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">{{ birthDate || '请选择' }}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="param-item" @click="showLocationPicker = true">
+                <span class="param-label">参保地</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">{{ locationInfo.name }}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="param-item" @click="showYearsPicker = true">
+                <span class="param-label">缴费年限</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">{{ contributionYears }}年</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="param-item" @click="showSalaryPicker = true">
+                <span class="param-label">月工资</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">¥{{ formatMoney(salary) }}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="param-item" @click="showBalancePicker = true">
+                <span class="param-label">账户余额</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">¥{{ formatMoney(accountBalance) }}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="param-item" @click="showIndexPicker = true">
+                <span class="param-label">缴费指数</span>
+                <div class="param-value-wrap">
+                  <span class="param-value">{{ contributionIndex.toFixed(1) }}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B949E" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Assumptions Note 测算假设 -->
+        <div class="assumptions stagger">
+          <div class="glass-card">
+            <div class="assumption-title">💡 测算假设</div>
+            <div class="assumption-notes">
+              * 假设工资年增长率3%，个人账户年利率3%<br>
+              * 基础养老金 = 月社平工资 × (1 + 缴费指数) / 2 × 缴费年限 × 1%<br>
+              * 个人账户养老金 = 账户余额 ÷ 计发月数（{{ retirementInfo.months }}个月）
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Disclaimer -->
+      <div class="disclaimer stagger">
+        <div class="glass-card disclaimer-card">
+          <div class="disclaimer-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #F78166;">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </div>
+          <div class="disclaimer-text">
+            本计算结果基于当前政策和假设条件推算，仅供参考。实际养老金待遇以社保部门核定为准。
+          </div>
+        </div>
+      </div>
     </div>
-    
-    <!-- 未登录提示 -->
-    <div v-if="!userStore.isLoggedIn" class="not-logged">
-      <van-icon name="user-o" size="48" color="#969799" />
-      <p>请先登录查看您的退休工资预测</p>
-      <van-button type="primary" @click="$router.push('/login')">去登录</van-button>
-    </div>
-    
-    <!-- 已登录：显示用户信息 -->
-    <template v-else>
-      <!-- 用户信息卡片 -->
-      <div class="info-card">
-        <div class="card-header">
-          <h3>👤 个人信息</h3>
-          <van-button size="small" type="primary" plain to="/profile">
-            修改档案
-          </van-button>
+
+    <!-- 选择器弹窗 -->
+    <van-popup v-model:show="showGenderPicker" position="bottom" round>
+      <van-picker title="选择性别" :columns="[{ text: '男', value: 1 }, { text: '女', value: 2 }]" @confirm="onConfirmGender" @cancel="showGenderPicker = false" />
+    </van-popup>
+    <van-popup v-model:show="showDatePicker" position="bottom" round>
+      <van-date-picker v-model="birthDateValue" title="选择出生日期" :min-date="new Date(1940, 0, 1)" :max-date="new Date(2010, 11, 31)" @confirm="onConfirmDate" @cancel="showDatePicker = false" />
+    </van-popup>
+    <van-popup v-model:show="showLocationPicker" position="bottom" round>
+      <van-picker title="选择参保地" :columns="locationOptions" @confirm="onConfirmLocation" @cancel="showLocationPicker = false" />
+    </van-popup>
+    <van-popup v-model:show="showYearsPicker" position="bottom" round>
+      <van-picker title="选择缴费年限" :columns="yearsOptions" @confirm="onConfirmYears" @cancel="showYearsPicker = false" />
+    </van-popup>
+    <van-popup v-model:show="showIndexPicker" position="bottom" round>
+      <van-picker title="选择缴费指数" :columns="indexOptions" @confirm="onConfirmIndex" @cancel="showIndexPicker = false" />
+    </van-popup>
+    <!-- 工资输入弹窗 -->
+    <van-popup v-model:show="showSalaryPicker" position="bottom" round>
+      <div class="input-popup">
+        <div class="popup-header">
+          <span class="popup-cancel" @click="showSalaryPicker = false">取消</span>
+          <span class="popup-title">输入月工资</span>
+          <span class="popup-confirm" @click="onConfirmSalary">确定</span>
         </div>
-        
-        <div class="info-grid">
-          <div class="info-item">
-            <span class="info-label">性别</span>
-            <span class="info-value">{{ genderText }}</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">出生日期</span>
-            <span class="info-value">{{ userInfo.birthDate || '未填写' }}</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">当前月工资</span>
-            <span class="info-value">{{ formatMoney(userInfo.salary) }} 元</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">个人账户余额</span>
-            <span class="info-value">{{ formatMoney(userInfo.accountBalance) }} 元</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">已缴费年限</span>
-            <span class="info-value">{{ userInfo.contributionYears }} 年</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">缴费工资系数</span>
-            <span class="info-value">{{ userInfo.contributionIndex.toFixed(1) }}</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">工作类型</span>
-            <span class="info-value">{{ jobTypeText }}</span>
-          </div>
-          
-          <div class="info-item">
-            <span class="info-label">参保地</span>
-            <span class="info-value">{{ locationInfo.name }}</span>
-          </div>
+        <div class="popup-content">
+          <van-field v-model="salaryInput" type="number" placeholder="请输入月工资金额" />
         </div>
       </div>
-      
-      <!-- 退休信息预览 -->
-      <div class="preview-card">
-        <div class="preview-title">📊 退休信息预览</div>
-        <div class="preview-grid">
-          <div class="preview-item">
-            <span class="preview-label">当前年龄</span>
-            <span class="preview-value">{{ age ?? '-' }} 岁</span>
-          </div>
-          <div class="preview-item">
-            <span class="preview-label">退休年龄</span>
-            <span class="preview-value highlight">{{ retirementInfo.text }}</span>
-          </div>
-          <div class="preview-item">
-            <span class="preview-label">距退休</span>
-            <span class="preview-value highlight">{{ yearsToRetire ?? '-' }} 年</span>
-          </div>
-          <div class="preview-item">
-            <span class="preview-label">预计退休日期</span>
-            <span class="preview-value">{{ retirementDate || '请填写出生日期' }}</span>
-          </div>
+    </van-popup>
+    <!-- 账户余额输入弹窗 -->
+    <van-popup v-model:show="showBalancePicker" position="bottom" round>
+      <div class="input-popup">
+        <div class="popup-header">
+          <span class="popup-cancel" @click="showBalancePicker = false">取消</span>
+          <span class="popup-title">输入账户余额</span>
+          <span class="popup-confirm" @click="onConfirmBalance">确定</span>
+        </div>
+        <div class="popup-content">
+          <van-field v-model="balanceInput" type="number" placeholder="请输入个人账户余额" />
         </div>
       </div>
-      
-      <!-- 计算按钮 -->
-      <div class="calc-button">
-        <van-button type="primary" block size="large" @click="calculate">
-          开始计算退休工资
-        </van-button>
-      </div>
-      
-      <!-- 计算结果 -->
-      <div v-if="showResult && result" class="result-card">
-        <div class="result-header">
-          <h3>计算结果</h3>
-          <span class="retire-tag">{{ result.retirementAge }}</span>
-        </div>
-        
-        <div class="result-total">
-          <div class="total-label">预估月领养老金</div>
-          <div class="total-amount">
-            <span class="currency">¥</span>
-            <span class="number">{{ formatMoney(result.totalPension) }}</span>
-            <span class="unit">元/月</span>
-          </div>
-          <div class="total-date">预计 {{ result.retirementDate }} 退休</div>
-        </div>
-        
-        <div class="result-detail">
-          <div class="detail-item">
-            <div class="detail-label">基础养老金</div>
-            <div class="detail-value">¥{{ formatMoney(result.basicPension) }}</div>
-            <div class="detail-formula">
-              社平工资 × (1 + 缴费指数) / 2 × {{ result.totalContributionYears }}年 × 1%
-            </div>
-          </div>
-          <div class="detail-item">
-            <div class="detail-label">个人账户养老金</div>
-            <div class="detail-value">¥{{ formatMoney(result.personalPension) }}</div>
-            <div class="detail-formula">
-              {{ formatMoney(result.futureAccountBalance) }}元 ÷ {{ retirementInfo.months }}个月
-            </div>
-          </div>
-        </div>
-        
-        <div class="result-chart">
-          <div class="chart-bar">
-            <div class="bar basic" :style="{ width: (result.basicPension / result.totalPension * 100) + '%' }">
-              <span v-if="result.basicPension / result.totalPension > 0.2">基础</span>
-            </div>
-            <div class="bar personal" :style="{ width: (result.personalPension / result.totalPension * 100) + '%' }">
-              <span v-if="result.personalPension / result.totalPension > 0.2">个人</span>
-            </div>
-          </div>
-          <div class="chart-legend">
-            <span class="legend-item">
-              <i class="dot basic"></i>
-              基础养老金 {{ Math.round(result.basicPension / result.totalPension * 100) }}%
-            </span>
-            <span class="legend-item">
-              <i class="dot personal"></i>
-              个人账户 {{ Math.round(result.personalPension / result.totalPension * 100) }}%
-            </span>
-          </div>
-        </div>
-        
-        <div class="result-assumptions">
-          <div class="assumptions-title">📈 计算假设</div>
-          <div class="assumptions-list">
-            <div class="assumption-item">
-              <span class="assumption-label">预计退休时社平工资</span>
-              <span class="assumption-value">{{ formatMoney(result.futureAvgSalary) }} 元</span>
-            </div>
-            <div class="assumption-item">
-              <span class="assumption-label">预计个人账户余额</span>
-              <span class="assumption-value">{{ formatMoney(result.futureAccountBalance) }} 元</span>
-            </div>
-            <div class="assumption-item">
-              <span class="assumption-label">总缴费年限</span>
-              <span class="assumption-value">{{ result.totalContributionYears }} 年</span>
-            </div>
-          </div>
-          <div class="assumptions-note">
-            * 假设工资年增长率3%，个人账户年利率3%
-          </div>
-        </div>
-      </div>
-    </template>
-    
-    <!-- 免责声明 -->
-    <div class="disclaimer">
-      <van-icon name="warning-o" />
-      <span>本计算结果基于当前政策和假设条件推算，仅供参考。实际养老金待遇以社保部门核定为准。</span>
-    </div>
+    </van-popup>
   </div>
 </template>
 
 <style scoped>
 .calculator-page {
   min-height: 100vh;
-  background: #f5f7fa;
-  padding-bottom: 80px;
+  padding-bottom: 100px;
 }
 
-.page-header {
-  background: linear-gradient(135deg, #1989fa 0%, #4a9ff5 100%);
-  padding: 24px 16px;
-  color: white;
+.page-container {
+  padding: 56px 24px 0;
 }
 
-.title {
+/* Header */
+.header-section {
+  margin-bottom: 24px;
+}
+
+.page-title {
   font-size: 24px;
-  font-weight: bold;
-  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
-.desc {
+.page-subtitle-inline {
   font-size: 14px;
-  opacity: 0.9;
+  font-weight: 400;
+  color: var(--fg-muted);
+  margin-left: 8px;
 }
 
+/* Not Logged */
 .not-logged {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  background: white;
-  margin: 16px;
-  border-radius: 12px;
+  margin-bottom: 24px;
 }
 
-.not-logged p {
-  color: #969799;
-  margin: 16px 0;
+.login-card {
+  padding: 32px 24px;
+  text-align: center;
 }
 
-.info-card {
-  background: white;
-  margin: -16px 16px 16px;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.login-icon {
   margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f5f5f5;
 }
 
-.card-header h3 {
-  font-size: 16px;
-  font-weight: bold;
-  color: #323233;
-}
-
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
-  background: #f7f8fa;
-  border-radius: 8px;
-}
-
-.info-label {
-  font-size: 12px;
-  color: #969799;
-}
-
-.info-value {
-  font-size: 15px;
-  color: #323233;
-  font-weight: 500;
-}
-
-.preview-card {
-  background: white;
-  margin: 0 16px 16px;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-
-.preview-title {
-  font-size: 15px;
-  font-weight: bold;
-  color: #323233;
-  margin-bottom: 12px;
-}
-
-.preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.preview-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-}
-
-.preview-label {
-  font-size: 13px;
-  color: #969799;
-}
-
-.preview-value {
+.login-text {
+  color: var(--fg-muted);
+  margin-bottom: 24px;
   font-size: 14px;
-  color: #323233;
-  font-weight: 500;
 }
 
-.preview-value.highlight {
-  color: #1989fa;
-  font-weight: bold;
-}
-
-.calc-button {
-  padding: 0 16px 16px;
+/* Result Section */
+.result-section {
+  margin-bottom: 24px;
 }
 
 .result-card {
-  background: white;
-  margin: 0 16px 16px;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  padding: 20px;
 }
 
 .result-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #f5f5f5;
+  margin-bottom: 20px;
 }
 
-.result-header h3 {
-  font-size: 16px;
-  font-weight: bold;
-  color: #323233;
-}
-
-.retire-tag {
-  font-size: 12px;
-  color: #1989fa;
-  background: #e8f4fd;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.result-total {
-  background: linear-gradient(135deg, #1989fa 0%, #4a9ff5 100%);
-  padding: 24px;
-  text-align: center;
-  color: white;
-}
-
-.total-label {
+.result-label {
   font-size: 14px;
-  opacity: 0.9;
+  font-weight: 500;
+  color: var(--fg-muted);
   margin-bottom: 8px;
 }
 
-.total-amount {
+.result-amount {
   display: flex;
   align-items: baseline;
-  justify-content: center;
-  gap: 4px;
+  gap: 2px;
 }
 
-.total-amount .currency {
+.result-amount .currency {
   font-size: 20px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
-.total-amount .number {
-  font-size: 36px;
-  font-weight: bold;
+.result-amount .number {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--fg);
+  font-family: 'Space Grotesk', 'Helvetica Neue', sans-serif;
 }
 
-.total-amount .unit {
-  font-size: 14px;
-  opacity: 0.9;
+/* Pension Breakdown */
+.pension-breakdown {
+  border-top: 1px solid rgba(240, 246, 252, 0.1);
+  padding-top: 16px;
 }
 
-.total-date {
-  font-size: 13px;
-  opacity: 0.8;
-  margin-top: 8px;
-}
-
-.result-detail {
-  padding: 16px;
+.breakdown-boxes {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+  margin-bottom: 16px;
 }
 
-.detail-item {
-  background: #f7f8fa;
-  padding: 12px;
-  border-radius: 8px;
-}
-
-.detail-label {
-  font-size: 12px;
-  color: #969799;
-  margin-bottom: 4px;
-}
-
-.detail-value {
-  font-size: 18px;
-  font-weight: bold;
-  color: #323233;
-  margin-bottom: 4px;
-}
-
-.detail-formula {
-  font-size: 11px;
-  color: #969799;
-  line-height: 1.4;
-}
-
-.result-chart {
-  padding: 0 16px 16px;
-}
-
-.chart-bar {
-  display: flex;
-  height: 24px;
+.breakdown-box {
+  padding: 14px;
   border-radius: 12px;
-  overflow: hidden;
-  background: #f5f5f5;
+  text-align: center;
 }
 
-.chart-bar .bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: white;
-  min-width: 40px;
-  transition: width 0.3s;
+.breakdown-box.basic {
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.2);
 }
 
-.chart-bar .bar.basic {
-  background: #1989fa;
+.breakdown-box.personal {
+  background: rgba(247, 129, 102, 0.1);
+  border: 1px solid rgba(247, 129, 102, 0.2);
 }
 
-.chart-bar .bar.personal {
-  background: #ff976a;
+.box-label {
+  display: block;
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin-bottom: 8px;
 }
 
-.chart-legend {
-  display: flex;
-  justify-content: center;
-  gap: 24px;
+.box-value {
+  display: block;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.progress-bar-wrap {
   margin-top: 12px;
 }
 
-.legend-item {
+.progress-bar {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #646566;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(240, 246, 252, 0.1);
 }
 
-.legend-item .dot {
+.progress-basic {
+  background: #58A6FF;
+  transition: width 0.3s ease;
+}
+
+.progress-personal {
+  background: #F78166;
+  transition: width 0.3s ease;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.progress-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.progress-label .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
 
-.legend-item .dot.basic {
-  background: #1989fa;
+.progress-label .dot.basic {
+  background: #58A6FF;
 }
 
-.legend-item .dot.personal {
-  background: #ff976a;
+.progress-label .dot.personal {
+  background: #F78166;
 }
 
-.result-assumptions {
-  margin: 0 16px 16px;
-  padding: 16px;
-  background: #f7f8fa;
-  border-radius: 8px;
+/* Params Section */
+.params-section {
+  margin-bottom: 24px;
 }
 
-.assumptions-title {
-  font-size: 14px;
-  font-weight: bold;
-  color: #323233;
-  margin-bottom: 12px;
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 16px;
+  padding: 20px 20px 0;
 }
 
-.assumptions-list {
+.params-grid {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+
+.param-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(30, 37, 46, 0.9);
+  border: 1px solid rgba(240, 246, 252, 0.1);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.param-item:hover {
+  background: rgba(40, 47, 56, 0.9);
+  border-color: rgba(88, 166, 255, 0.3);
+}
+
+.param-label {
+  font-size: 15px;
+  color: #8B949E;
+}
+
+.param-value-wrap {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
-.assumption-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-}
-
-.assumption-label {
-  color: #969799;
-}
-
-.assumption-value {
-  color: #323233;
+.param-value {
+  font-size: 15px;
+  color: #F0F6FC;
   font-weight: 500;
 }
 
-.assumptions-note {
-  font-size: 11px;
-  color: #969799;
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px dashed #ddd;
+/* Assumptions */
+.assumptions {
+  margin-bottom: 24px;
 }
 
+.assumption-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 12px;
+  padding: 20px 20px 0;
+}
+
+.assumption-notes {
+  padding: 0 20px 20px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.8;
+}
+
+/* Disclaimer */
 .disclaimer {
+  margin-bottom: 24px;
+}
+
+.disclaimer-card {
+  padding: 16px;
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 16px;
+  gap: 12px;
+}
+
+.disclaimer-icon {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.disclaimer-text {
   font-size: 12px;
-  color: #969799;
-  line-height: 1.5;
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+
+/* Input Popup */
+.input-popup {
+  background: var(--bg-primary);
+}
+
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(240, 246, 252, 0.1);
+}
+
+.popup-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.popup-cancel {
+  font-size: 14px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.popup-confirm {
+  font-size: 14px;
+  color: #58A6FF;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.popup-content {
+  padding: 20px;
+}
+
+.popup-content :deep(.van-field) {
+  background: rgba(30, 37, 46, 0.9);
+  border: 1px solid rgba(240, 246, 252, 0.1);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.popup-content :deep(.van-field__control) {
+  color: var(--fg);
+  font-size: 18px;
 }
 </style>

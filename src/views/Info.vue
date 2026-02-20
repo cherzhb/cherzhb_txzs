@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast, showLoadingToast } from 'vant'
+import { showToast } from 'vant'
 import { articleAPI } from '@/api'
 
 const router = useRouter()
@@ -80,92 +80,175 @@ onActivated(loadArticles)
 
 <template>
   <div class="info-page">
-    <!-- 分类标签 -->
-    <div class="categories">
-      <van-tabs v-model:active="activeCategory" @change="onCategoryChange">
-        <van-tab v-for="cat in categories" :key="cat.id" :title="cat.name" :name="cat.id" />
-      </van-tabs>
-    </div>
+    <div class="page-container">
+      <!-- Header -->
+      <div class="header">
+        <h1 class="page-title">养老资讯</h1>
+        <p class="page-subtitle">获取最新政策与健康信息</p>
+      </div>
 
-    <!-- 文章列表 -->
-    <van-pull-refresh v-model="refreshing" @refresh="onRefresh">
-      <van-loading v-if="loading && !refreshing" class="loading-center" />
-      
-      <div v-else>
-        <div v-for="article in articles" :key="article.id" class="article-item" @click="goToDetail(article.id)">
-          <div class="article-category">{{ article.categoryLabel }}</div>
-          <div class="article-title">{{ article.title }}</div>
-          <div class="article-summary">{{ article.summary }}</div>
-          <div class="article-meta">
-            <span class="view-count">👁 {{ article.viewCount }}</span>
-            <span class="publish-time">📅 {{ article.publishTime }}</span>
+      <!-- 分类标签 -->
+      <div class="categories">
+        <van-tabs v-model:active="activeCategory" @change="onCategoryChange">
+          <van-tab v-for="cat in categories" :key="cat.id" :title="cat.name" :name="cat.id" />
+        </van-tabs>
+      </div>
+
+      <!-- 文章列表 -->
+      <van-pull-refresh v-model="refreshing" @refresh="onRefresh">
+        <div v-if="loading && !refreshing" class="loading-center">
+          <van-loading size="24px" />
+        </div>
+        
+        <div v-else class="articles-list">
+          <div
+            v-for="article in articles"
+            :key="article.id"
+            class="article-card"
+            @click="goToDetail(article.id)"
+          >
+            <div class="article-category">{{ article.categoryLabel }}</div>
+            <div class="article-title">{{ article.title }}</div>
+            <div class="article-summary">{{ article.summary }}</div>
+            <div class="article-meta">
+              <span class="view-count">👁 {{ article.viewCount }}</span>
+              <span class="publish-time">📅 {{ article.publishTime }}</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- 空状态 -->
-      <div v-if="articles.length === 0 && !loading" class="empty-state">
-        <div class="empty-icon">📰</div>
-        <div class="empty-text">暂无文章</div>
-      </div>
-    </van-pull-refresh>
+        <!-- 空状态 -->
+        <div v-if="articles.length === 0 && !loading" class="empty-state">
+          <div class="empty-icon">📰</div>
+          <div class="empty-text">暂无文章</div>
+        </div>
+      </van-pull-refresh>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .info-page {
   min-height: 100vh;
-  background: #f7f8fa;
-  padding-bottom: 80px;
+  position: relative;
+  z-index: 1;
+  padding-bottom: 100px;
 }
 
+.page-container {
+  padding: 56px 20px 0;
+}
+
+/* Header */
+.header {
+  padding: 0 4px 24px;
+  margin-bottom: 16px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+/* Categories */
 .categories {
-  background: white;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 4px;
+  margin-bottom: 20px;
 }
 
+:deep(.van-tabs__wrap) {
+  padding: 4px;
+}
+
+:deep(.van-tabs__nav) {
+  background: transparent;
+}
+
+:deep(.van-tab) {
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+:deep(.van-tab--active) {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+:deep(.van-tabs__line) {
+  background: var(--accent-primary);
+}
+
+/* Loading */
 .loading-center {
   display: flex;
   justify-content: center;
   padding: 40px;
 }
 
-.article-item {
-  background: white;
-  padding: 16px;
-  margin: 12px;
-  border-radius: 12px;
-  cursor: pointer;
+.loading-center :deep(.van-loading__spinner) {
+  color: var(--accent-primary);
 }
 
-.article-item:active {
+/* Articles List */
+.articles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.article-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.article-card:active {
   transform: scale(0.98);
-  transition: transform 0.2s;
+}
+
+.article-card:hover {
+  border-color: rgba(88, 166, 255, 0.3);
 }
 
 .article-category {
   display: inline-block;
-  padding: 2px 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 4px 12px;
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   color: white;
-  border-radius: 4px;
+  border-radius: 12px;
   font-size: 11px;
-  margin-bottom: 8px;
+  font-weight: 500;
+  margin-bottom: 12px;
 }
 
 .article-title {
-  font-size: 17px;
-  font-weight: bold;
-  color: #323233;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
   margin-bottom: 8px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .article-summary {
-  font-size: 14px;
-  color: #646566;
+  font-size: 13px;
+  color: var(--fg-muted);
   line-height: 1.6;
   margin-bottom: 12px;
   display: -webkit-box;
@@ -178,9 +261,10 @@ onActivated(loadArticles)
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: #969799;
+  color: var(--fg-muted);
 }
 
+/* Empty State */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -192,10 +276,11 @@ onActivated(loadArticles)
 .empty-icon {
   font-size: 64px;
   margin-bottom: 16px;
+  opacity: 0.5;
 }
 
 .empty-text {
-  font-size: 16px;
-  color: #969799;
+  font-size: 15px;
+  color: var(--fg-muted);
 }
 </style>

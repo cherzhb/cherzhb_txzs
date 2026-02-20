@@ -1,3 +1,4 @@
+
 # Logs
 logs
 *.log
@@ -7,12 +8,15 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build
 dist
 dist-ssr
 *.local
 
-# Editor directories and files
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -22,3 +26,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment
+.env
+server/.env
+
+# Database
+*.db
+server/database.db
+server/retirement.db
+
+# Backups
+backups/
+*.bak
+*.gz
+

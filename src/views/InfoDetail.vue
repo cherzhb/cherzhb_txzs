@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { showToast, showLoadingToast } from 'vant'
+import { showToast } from 'vant'
+import { articleAPI } from '@/api'
+import DOMPurify from 'dompurify'
 
 const router = useRouter()
 const route = useRoute()
@@ -18,51 +20,39 @@ const fontSize = ref(18)
 // 工具栏显示状态
 const showToolbar = ref(false)
 
-// 模拟文章数据
-const mockArticles = {
-  1: {
-    id: 1,
-    title: '2025年退休政策最新解读',
-    summary: '详细解析新退休政策实施细则，看看哪些变化会影响你',
-    category: 'policy',
-    categoryLabel: '政策',
-    viewCount: 12580,
-    publishTime: '2025-02-15',
-    content: `
-      <h2>2025年退休政策最新解读</h2>
-      <p>随着人口老龄化加剧，国家陆续出台了一系列退休相关政策。本文将为您详细解读最新的政策变化。</p>
-      
-      <h3>1. 延迟退休方案</h3>
-      <p>根据最新政策，延迟退休将采取渐进式实施。具体方案如下：</p>
-      <ul>
-        <li>男职工逐步延迟到65周岁退休</li>
-        <li>女干部逐步延迟到60周岁退休</li>
-        <li>女职工逐步延迟到55周岁退休</li>
-      </ul>
-      
-      <h3>2. 养老金计算方式调整</h3>
-      <p>新的养老金计算方式更加注重缴费年限和缴费指数的权重，鼓励长期缴费。</p>
-      
-      <p>建议您尽早规划，合理配置资产，为退休生活做好准备。</p>
-    `
-  },
-  // ... 其他文章
+// 分类名称映射
+const categoryNames = {
+  policy: '政策',
+  health: '健康',
+  finance: '理财',
+  life: '生活',
+  news: '新闻'
 }
 
 onMounted(async () => {
-  // 获取文章数据
   loading.value = true
-  
-  // 模拟从后端获取
-  const favorites = JSON.parse(localStorage.getItem('favorites') || '[]')
-  article.value = mockArticles[route.params.id] || mockArticles[1]
-  isFavorite.value = favorites.some(f => f.id === article.value?.id)
-  
-  loading.value = false
-  
-  // 更新阅读量（模拟）
-  if (article.value) {
-    article.value.viewCount += 1
+  try {
+    // 从后端API获取文章详情
+    const data = await articleAPI.getDetail(route.params.id)
+    article.value = {
+      id: data.id,
+      title: data.title,
+      summary: data.summary,
+      category: data.category,
+      categoryLabel: categoryNames[data.category] || data.category,
+      viewCount: data.view_count || 0,
+      publishTime: data.created_at?.split('T')[0] || data.created_at?.split(' ')[0] || '',
+      content: data.content
+    }
+    
+    // 检查收藏状态
+    const favorites = JSON.parse(localStorage.getItem('favorites') || '[]')
+    isFavorite.value = favorites.some(f => f.id === article.value?.id)
+  } catch (err) {
+    console.error('加载文章失败:', err)
+    showToast('文章加载失败')
+  } finally {
+    loading.value = false
   }
 })
 
@@ -91,9 +81,7 @@ const shareArticle = () => {
 // 收藏/取消收藏
 const toggleFavorite = () => {
   isFavorite.value = !isFavorite.value
-  
   let favs = JSON.parse(localStorage.getItem('favorites') || '[]')
-  
   if (isFavorite.value) {
     favs.push({ id: article.value.id, title: article.value.title })
     showToast('已收藏')
@@ -101,7 +89,6 @@ const toggleFavorite = () => {
     favs = favs.filter(f => f.id !== article.value.id)
     showToast('已取消收藏')
   }
-  
   localStorage.setItem('favorites', JSON.stringify(favs))
 }
 
@@ -118,149 +105,201 @@ const contentStyle = computed(() => ({
 
 // 工具栏操作
 const toolbarActions = [
-  { name: '调大字体', callback: () => { fontSize.value = Math.min(24, fontSize.value + 2) } },
-  { name: '调小字体', callback: () => { fontSize.value = Math.max(14, fontSize.value - 2) } },
-  { name: '复制链接', callback: () => { showToast('链接已复制') } }
+  {
+    name: '调大字体',
+    callback: () => {
+      fontSize.value = Math.min(24, fontSize.value + 2)
+    }
+  },
+  {
+    name: '调小字体',
+    callback: () => {
+      fontSize.value = Math.max(14, fontSize.value - 2)
+    }
+  },
+  {
+    name: '复制链接',
+    callback: () => {
+      showToast('链接已复制')
+    }
+  }
 ]
 </script>
 
 <template>
   <div class="detail-page">
-    <!-- 加载状态 -->
-    <div v-if="loading" class="loading-state">
-      <van-loading size="24">加载中...</van-loading>
-    </div>
-
-    <!-- 文章内容 -->
-    <div v-else-if="article" class="article-container">
-      <!-- 头部工具栏 -->
-      <div class="header-bar">
-        <van-icon name="arrow-left" @click="goBack" />
-        <div class="title">{{ article.title }}</div>
-        <van-icon name="ellipsis" @click="showToolbar = !showToolbar" />
+    <div class="page-container">
+      <!-- 加载状态 -->
+      <div v-if="loading" class="loading-state">
+        <van-loading size="24">加载中...</van-loading>
       </div>
 
-      <!-- 文章信息 -->
-      <div class="article-info">
-        <span class="category">{{ article.categoryLabel }}</span>
-        <span class="publish-time">{{ article.publishTime }}</span>
-        <span class="view-count">{{ article.viewCount }} 阅读</span>
+      <!-- 文章内容 -->
+      <div v-else-if="article" class="article-container">
+        <!-- Header -->
+        <div class="header">
+          <van-icon name="arrow-left" @click="goBack" />
+          <span class="header-title">文章详情</span>
+          <van-icon name="ellipsis" @click="showToolbar = !showToolbar" />
+        </div>
+
+        <!-- 文章信息 -->
+        <div class="article-meta">
+          <span class="category">{{ article.categoryLabel }}</span>
+          <div class="meta-right">
+            <span class="publish-time">{{ article.publishTime }}</span>
+            <span class="view-count">👁 {{ article.viewCount }}</span>
+          </div>
+        </div>
+
+        <!-- 文章标题 -->
+        <h1 class="article-title">{{ article.title }}</h1>
+
+        <!-- 文章正文 -->
+        <div class="article-content" :style="contentStyle" v-html="DOMPurify.sanitize(article.content)"></div>
+
+        <!-- 底部操作栏 -->
+        <div class="footer-actions">
+          <div class="action-btn" @click="changeFontSize">
+            <van-icon name="description" />
+            <span>{{ fontSize }}号</span>
+          </div>
+          <div class="action-btn" @click="toggleFavorite">
+            <van-icon :name="isFavorite ? 'star' : 'star-o'" />
+            <span>{{ isFavorite ? '已收藏' : '收藏' }}</span>
+          </div>
+          <div class="action-btn" @click="shareArticle">
+            <van-icon name="share-o" />
+            <span>分享</span>
+          </div>
+        </div>
       </div>
 
-      <!-- 文章正文 -->
-      <div class="article-content" :style="contentStyle" v-html="article.content"></div>
-
-      <!-- 底部操作栏 -->
-      <div class="footer-actions">
-        <div class="action-btn" @click="changeFontSize">
-          <van-icon name="description" />
-          <span>{{ fontSize }}号</span>
-        </div>
-        <div class="action-btn" @click="toggleFavorite">
-          <van-icon :name="isFavorite ? 'star' : 'star-o'" />
-          <span>{{ isFavorite ? '已收藏' : '收藏' }}</span>
-        </div>
-        <div class="action-btn" @click="shareArticle">
-          <van-icon name="share-o" />
-          <span>分享</span>
-        </div>
+      <!-- 文章不存在 -->
+      <div v-else class="empty-state">
+        <div class="empty-icon">📄</div>
+        <div class="empty-text">文章不存在</div>
+        <button class="btn-primary" @click="goBack">返回列表</button>
       </div>
-
-      <!-- 更多操作弹窗 -->
-      <van-action-sheet v-model:show="showToolbar" :actions="toolbarActions" cancel-text="取消" />
     </div>
 
-    <!-- 文章不存在 -->
-    <div v-else class="empty-state">
-      <div class="empty-icon">📄</div>
-      <div class="empty-text">文章不存在</div>
-      <van-button type="primary" @click="goBack">返回列表</van-button>
-    </div>
+    <!-- 更多操作弹窗 -->
+    <van-action-sheet v-model:show="showToolbar" :actions="toolbarActions" cancel-text="取消" />
   </div>
 </template>
 
 <style scoped>
 .detail-page {
   min-height: 100vh;
-  background: white;
+  position: relative;
+  z-index: 1;
+  padding-bottom: 100px;
 }
 
+.page-container {
+  padding: 56px 20px 0;
+}
+
+/* Loading */
 .loading-state {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
+  height: calc(100vh - 56px);
 }
 
-.header-bar {
+.loading-state :deep(.van-loading__spinner) {
+  color: var(--accent-primary);
+}
+
+/* Header */
+.header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #f5f5f5;
-  position: sticky;
-  top: 0;
-  background: white;
-  z-index: 10;
+  padding: 0 4px 16px;
+  margin-bottom: 20px;
 }
 
-.header-bar .van-icon {
+.header .van-icon {
   font-size: 20px;
-  color: #323233;
+  color: var(--fg);
   cursor: pointer;
+  padding: 8px;
 }
 
-.title {
+.header-title {
   flex: 1;
   font-size: 16px;
-  font-weight: bold;
+  font-weight: 600;
+  color: var(--fg);
   text-align: center;
-  margin: 0 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.article-info {
-  padding: 16px 20px;
+/* Article Meta */
+.article-meta {
   display: flex;
-  gap: 16px;
-  font-size: 13px;
-  color: #969799;
-  border-bottom: 1px solid #f5f5f5;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 0 4px;
 }
 
 .category {
-  padding: 2px 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 4px 12px;
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   color: white;
-  border-radius: 4px;
+  border-radius: 12px;
   font-size: 11px;
+  font-weight: 500;
 }
 
+.meta-right {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* Article Title */
+.article-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--fg);
+  margin-bottom: 24px;
+  line-height: 1.4;
+  padding: 0 4px;
+}
+
+/* Article Content */
 .article-content {
-  padding: 24px 20px;
   line-height: 1.8;
-  color: #323233;
+  color: var(--fg);
+  padding: 0 4px;
 }
 
 :deep(.article-content h2) {
   font-size: 1.3em;
   margin: 1.5em 0 0.8em;
-  color: #323233;
+  color: var(--fg);
   line-height: 1.4;
+  font-weight: 600;
 }
 
 :deep(.article-content h3) {
   font-size: 1.15em;
   margin: 1.3em 0 0.6em;
-  color: #323233;
+  color: var(--fg);
   line-height: 1.4;
+  font-weight: 600;
 }
 
 :deep(.article-content p) {
   margin-bottom: 1em;
   text-align: justify;
+  color: var(--fg-muted);
 }
 
 :deep(.article-content ul),
@@ -272,48 +311,58 @@ const toolbarActions = [
 :deep(.article-content li) {
   margin-bottom: 0.5em;
   line-height: 1.8;
+  color: var(--fg-muted);
 }
 
+/* Footer Actions */
 .footer-actions {
   display: flex;
   justify-content: space-around;
-  padding: 20px 0;
-  border-top: 1px solid #f5f5f5;
+  padding: 20px 20px 24px;
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  margin-top: 32px;
   position: sticky;
-  bottom: 0;
-  background: white;
+  bottom: 20px;
+  z-index: 10;
 }
 
 .action-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #323233;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
   cursor: pointer;
 }
 
 .action-btn .van-icon {
-  font-size: 24px;
+  font-size: 22px;
+  color: var(--fg);
 }
 
-empty-state {
+/* Empty State */
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  height: calc(100vh - 56px);
 }
 
 .empty-icon {
   font-size: 64px;
   margin-bottom: 20px;
+  opacity: 0.5;
 }
 
 .empty-text {
-  font-size: 16px;
-  color: #969799;
+  font-size: 15px;
+  color: var(--fg-muted);
   margin-bottom: 20px;
 }
 </style>

@@ -48,6 +48,24 @@ const routes = [
     name: 'ResetPassword',
     component: () => import('@/views/ResetPassword.vue'),
     meta: { title: '找回密码', showTabbar: false }
+  },
+  {
+    path: '/agreement',
+    name: 'Agreement',
+    component: () => import('@/views/Agreement.vue'),
+    meta: { title: '用户协议', showTabbar: false }
+  },
+  {
+    path: '/privacy',
+    name: 'Privacy',
+    component: () => import('@/views/Privacy.vue'),
+    meta: { title: '隐私政策', showTabbar: false }
+  },
+  {
+    path: '/version-manage',
+    name: 'VersionManage',
+    component: () => import('@/views/VersionManage.vue'),
+    meta: { title: '版本管理', showTabbar: false, requiresAuth: true }
   }
 ]
 

@@ -175,11 +175,11 @@ db.serialize(() => {
 // 邮件发送配置
 const createTransporter = () => {
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.163.com',
-    port: parseInt(process.env.SMTP_PORT) || 465,
-    secure: true,
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_PORT === '465',
     auth: {
-      user: process.env.SMTP_USER || '18612348799@163.com',
+      user: process.env.SMTP_USER || 'zhbcher@gmail.com',
       pass: process.env.SMTP_PASS || ''
     }
   });
@@ -242,8 +242,8 @@ app.post('/api/auth/send-code', async (req, res) => {
         try {
           const transporter = createTransporter();
           console.log('SMTP配置:', {
-            host: process.env.SMTP_HOST || 'smtp.163.com',
-            user: process.env.SMTP_USER || '18612348799@163.com',
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            user: process.env.SMTP_USER || 'zhbcher@gmail.com',
             hasPass: !!process.env.SMTP_PASS
           });
           
@@ -275,9 +275,8 @@ app.post('/api/auth/send-code', async (req, res) => {
       }
       
       res.json({
-        message: '验证码已发送',
+        
         // 开发环境返回验证码
-        devCode: code
       });
     }
   );
@@ -315,7 +314,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
           [username, email, phone, hashedPassword],
           function(err) {
             if (err) {
-              if (err.message.includes('UNIQUE')) {
+              if (err.message && err.message.includes('UNIQUE')) {
                 return res.status(400).json({ error: '用户名已存在' });
               }
               return res.status(500).json({ error: '注册失败' });
@@ -335,7 +334,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
       [username, email, phone, hashedPassword],
       function(err) {
         if (err) {
-          if (err.message.includes('UNIQUE')) {
+          if (err.message && err.message.includes('UNIQUE')) {
             return res.status(400).json({ error: '用户名已存在' });
           }
           return res.status(500).json({ error: '注册失败' });
@@ -770,6 +769,86 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   stmt.finalize();
 
   res.json({ message: '配置已更新' });
+});
+
+// ==================== APP版本管理 ====================
+// 获取最新版本信息
+app.get('/api/app/version', (req, res) => {
+    const { platform = 'android', versionCode } = req.query;
+    
+    db.get(
+        "SELECT * FROM app_versions WHERE platform = ? AND is_latest = 1 ORDER BY version_code DESC LIMIT 1",
+        [platform],
+        (err, latest) => {
+            if (err) {
+                return res.status(500).json({ error: '获取版本信息失败' });
+            }
+            
+            if (!latest) {
+                return res.json({ 
+                    hasUpdate: false, 
+                    currentVersion: versionCode 
+                });
+            }
+            
+            // 比较版本号
+            const currentCode = parseInt(versionCode) || 0;
+            const hasUpdate = latest.version_code > currentCode;
+            
+            // 判断是否强制更新
+            const forceUpdate = latest.update_type === 'force' && hasUpdate;
+            
+            res.json({
+                hasUpdate,
+                forceUpdate,
+                latestVersion: latest.version,
+                latestVersionCode: latest.version_code,
+                updateType: latest.update_type,
+                updateUrl: latest.update_url || 'https://txghzs.19780918.xyz',
+                updateContent: latest.update_content,
+                currentVersionCode: currentCode
+            });
+        }
+    );
+});
+
+// 管理员：获取所有版本
+app.get('/api/admin/versions', authMiddleware, adminMiddleware, (req, res) => {
+    db.all("SELECT * FROM app_versions ORDER BY created_at DESC", (err, versions) => {
+        if (err) {
+            return res.status(500).json({ error: '获取版本列表失败' });
+        }
+        res.json(versions);
+    });
+});
+
+// 管理员：发布新版本
+app.post('/api/admin/versions', authMiddleware, adminMiddleware, (req, res) => {
+    const { version, versionCode, platform, updateType, updateUrl, updateContent } = req.body;
+    
+    if (!version || !versionCode) {
+        return res.status(400).json({ error: '版本号和版本代码不能为空' });
+    }
+    
+    // 将之前的版本设为非最新
+    db.run("UPDATE app_versions SET is_latest = 0 WHERE platform = ?", [platform || 'android']);
+    
+    // 插入新版本
+    db.run(
+        "INSERT INTO app_versions (version, version_code, platform, update_type, update_url, update_content, is_latest) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        [version, versionCode, platform || 'android', updateType || 'optional', updateUrl, updateContent],
+        function(err) {
+            if (err) {
+                return res.status(500).json({ error: '发布版本失败' });
+            }
+            res.json({ 
+                message: '版本发布成功', 
+                id: this.lastID,
+                version,
+                versionCode
+            });
+        }
+    );
 });
 
 // SPA 回退 - 所有其他路由返回前端
