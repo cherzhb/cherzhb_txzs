@@ -41,9 +41,10 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Sync Capacitor
+      - name: Add and Sync Capacitor Android
         run: |
           rm -rf android || true
+          npx cap add android
           npx cap sync android
 
       - name: Build APK
